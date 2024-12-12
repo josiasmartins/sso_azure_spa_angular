@@ -1,52 +1,51 @@
-// app.component.ts
-import { Component, Inject, OnInit, OnDestroy } from '@angular/core';
-import { MSAL_GUARD_CONFIG, MsalBroadcastService, MsalGuardConfiguration, MsalService } from '@azure/msal-angular';
-import { Subject } from 'rxjs';
-import { filter, takeUntil } from 'rxjs/operators';
-import { InteractionStatus, RedirectRequest } from '@azure/msal-browser';
-import { environment } from '../environment/enviroment';
-// import { environment } from '../environments/environment';
+import { Component, OnInit } from '@angular/core';
+import { MsalService } from '@azure/msal-angular';
+import { PublicClientApplication } from '@azure/msal-browser';
 
 @Component({
   selector: 'app-root',
-  templateUrl: './app.component.html',
-  styleUrls: ['./app.component.css'],
+  template: `
+    <div *ngIf="!isLoggedIn">
+      <button (click)="login()">Login</button>
+    </div>
+    <div *ngIf="isLoggedIn">
+      <h1>Bem-vindo, {{ userName }}</h1>
+      <button (click)="logout()">Logout</button>
+    </div>
+  `,
   standalone: false
 })
-export class AppComponent implements OnInit, OnDestroy {
-  isUserLoggedIn = false;
-  private readonly _destroy = new Subject<void>();
+export class AppComponent implements OnInit {
+  isLoggedIn = false;
+  userName: string | null = null;
 
-  constructor(
-    @Inject(MSAL_GUARD_CONFIG) private msalGuardConfig: MsalGuardConfiguration,
-    private authService: MsalService,
-    private msalBroadcastService: MsalBroadcastService
-  ) {}
+  constructor(private authService: MsalService) {}
 
   async ngOnInit() {
-    await this.authService.instance.initialize();
-    // Subscribe to MSAL's interaction status updates
-    this.msalBroadcastService.inProgress$
-      .pipe(
-        filter((status: InteractionStatus) => status === InteractionStatus.None),
-        takeUntil(this._destroy)
-      )
-      .subscribe(() => {
-        this.isUserLoggedIn = this.authService.instance.getAllAccounts().length > 0;
-      });
+    try {
+      // Inicializa explicitamente o MSAL se necessário
+      const msalInstance = this.authService.instance as PublicClientApplication;
+
+      if (!msalInstance.getActiveAccount()) {
+        await msalInstance.initialize(); // Inicializa o MSAL (chave para evitar o erro)
+      }
+
+      // Trata redirecionamentos do login
+      await this.authService.instance.handleRedirectPromise();
+
+      const account = this.authService.instance.getActiveAccount();
+      this.isLoggedIn = !!account;
+      this.userName = account?.username || null;
+    } catch (error) {
+      console.error('Erro ao inicializar o MSAL:', error);
+    }
   }
 
-  ngOnDestroy(): void {
-    this._destroy.next();
-    this._destroy.complete();
+  login() {
+    this.authService.loginRedirect();
   }
 
-  login(): void {
-    const loginRequest = this.msalGuardConfig.authRequest || {};
-    this.authService.loginRedirect({ ...loginRequest } as RedirectRequest);
-  }
-
-  logout(): void {
-    this.authService.logoutRedirect({ postLogoutRedirectUri: environment.postLogoUrl });
+  logout() {
+    this.authService.logoutRedirect();
   }
 }
